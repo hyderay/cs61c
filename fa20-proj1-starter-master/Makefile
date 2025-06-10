@@ -1,7 +1,15 @@
-CC = gcc
-CFLAGS = -g -Wall -std=c99 -c
-LDFLAGS = -g -Wall
-VGFLAGS = --tool=memcheck --leak-check=full --dsymutil=yes --track-origins=yes
+# Compiler and Flags
+CC = clang
+CFLAGS = -g -Wall -std=c99 -O1 -fsanitize=address -c
+LDFLAGS = -g -Wall -O1 -fsanitize=address
+
+# Try to auto-detect platform for leak detection
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    DETECT_LEAKS =
+else
+    DETECT_LEAKS = ASAN_OPTIONS=detect_leaks=1
+endif
 
 all: PartA PartB
 
@@ -20,17 +28,16 @@ imageloader: imageloader.o imageloadertester.o
 	echo "Diff check: The above lines were different than expected. If no lines show up, then this passed"
 
 imagememcheck: imageloader
-	echo "Running memory check on imageloadertest"
-	valgrind $(VGFLAGS) ./imageloadertester testInputs/JohnConway.ppm > studentOutputs/JohnConway.ppm
-
+	echo "Running AddressSanitizer on imageloadertest"
+	$(DETECT_LEAKS) ./imageloadertester testInputs/JohnConway.ppm > studentOutputs/JohnConway.ppm
 
 steganography: imageloader.o steganography.o
-	echo "Running steganography"
 	$(CC) $(LDFLAGS) -o steganography steganography.o imageloader.o
+	echo "Running steganography"
 	./steganography testInputs/JohnConway.ppm > studentOutputs/secretMessage.ppm
 
-steganographymemcheck:  steganography
-	valgrind $(VGFLAGS) ./steganography testInputs/JohnConway.ppm > studentOutputs/secretMessage.ppm
+steganographymemcheck: steganography
+	$(DETECT_LEAKS) ./steganography testInputs/JohnConway.ppm > studentOutputs/secretMessage.ppm
 
 gameoflife: imageloader.o gameoflife.o
 	$(CC) $(LDFLAGS) -o gameOfLife gameoflife.o imageloader.o
@@ -38,8 +45,7 @@ gameoflife: imageloader.o gameoflife.o
 	echo "Run ./frames.csh for various tests"
 
 gameoflifememcheck: gameoflife
-	valgrind $(VGFLAGS) ./gameOfLife testInputs/JohnConway.ppm 0x1808 > studentOutputs/temp.ppm
-
+	$(DETECT_LEAKS) ./gameOfLife testInputs/JohnConway.ppm 0x1808 > studentOutputs/temp.ppm
 
 %.o: %.c
 	$(CC) $(CFLAGS) $<
@@ -49,3 +55,4 @@ clean:
 	rm -f gameOfLife
 	rm -f steganography
 	rm -f imageloadertester
+	rm -f studentOutputs/*.ppm
