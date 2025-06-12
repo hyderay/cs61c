@@ -1,58 +1,89 @@
-# Compiler and Flags
-CC = clang
-CFLAGS = -g -Wall -std=c99 -O1 -fsanitize=address -c
-LDFLAGS = -g -Wall -O1 -fsanitize=address
-
-# Try to auto-detect platform for leak detection
+########################################
+# Platform-specific compiler / ASan
+########################################
 UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-    DETECT_LEAKS =
-else
-    DETECT_LEAKS = ASAN_OPTIONS=detect_leaks=1
+
+ifeq ($(UNAME_S), Darwin)          # macOS
+    CC       := clang
+    SANFLAGS := -fsanitize=address -fno-omit-frame-pointer
+    RUN_ENV  := env MallocNanoZone=0
+else                               # Linux / other
+    CC       := gcc
+    SANFLAGS :=
+    RUN_ENV  :=
 endif
 
-all: PartA PartB
+########################################
+# Common flags
+########################################
+CFLAGS  := -g -Wall -std=c99 -c $(SANFLAGS)
+LDFLAGS := -g -Wall $(SANFLAGS)
 
-PartA: imageloader.o imageloadertester.o steganography.o
-	$(CC) $(LDFLAGS) -o imageloadertester imageloader.o imageloadertester.o
-	$(CC) $(LDFLAGS) -o steganography steganography.o imageloader.o
+########################################
+# Phony groups
+########################################
+.PHONY: all clean \
+        imageloader imagememcheck \
+        steganography steganographymemcheck \
+        gameoflife gameoflifememcheck
 
-PartB: imageloader.o gameoflife.o
-	$(CC) $(LDFLAGS) -o gameOfLife gameoflife.o imageloader.o
+all: imageloadertester steganography_bin gameOfLife   # just build
 
-imageloader: imageloader.o imageloadertester.o
-	$(CC) $(LDFLAGS) -o imageloadertester imageloader.o imageloadertester.o
-	echo "Running imageloadertest"
-	./imageloadertester testInputs/JohnConway.ppm > studentOutputs/JohnConway.ppm
-	diff testInputs/JohnConway.ppm studentOutputs/JohnConway.ppm
-	echo "Diff check: The above lines were different than expected. If no lines show up, then this passed"
+########################################
+# Binary-only rules
+########################################
+imageloadertester: imageloader.o imageloadertester.o
+	$(CC) $(LDFLAGS) $^ -o $@
 
-imagememcheck: imageloader
-	echo "Running AddressSanitizer on imageloadertest"
-	$(DETECT_LEAKS) ./imageloadertester testInputs/JohnConway.ppm > studentOutputs/JohnConway.ppm
+steganography_bin: steganography.o imageloader.o
+	$(CC) $(LDFLAGS) $^ -o steganography
 
-steganography: imageloader.o steganography.o
-	$(CC) $(LDFLAGS) -o steganography steganography.o imageloader.o
-	echo "Running steganography"
-	./steganography testInputs/JohnConway.ppm > studentOutputs/secretMessage.ppm
+gameOfLife: gameoflife.o imageloader.o
+	$(CC) $(LDFLAGS) $^ -o $@
 
-steganographymemcheck: steganography
-	$(DETECT_LEAKS) ./steganography testInputs/JohnConway.ppm > studentOutputs/secretMessage.ppm
+########################################
+# STEP 1 – functional tests
+########################################
+imageloader: imageloadertester
+	@echo "⇒ imageloadertest (diff)"
+	@$(RUN_ENV) ./imageloadertester testInputs/JohnConway.ppm \
+	    > studentOutputs/JohnConway.ppm
+	@diff -q testInputs/JohnConway.ppm studentOutputs/JohnConway.ppm && \
+	   echo "...diff passed." || echo "...diff FAILED."
 
-gameoflife: imageloader.o gameoflife.o
-	$(CC) $(LDFLAGS) -o gameOfLife gameoflife.o imageloader.o
-	echo "Successfully compiled"
-	echo "Run ./frames.csh for various tests"
+steganography: steganography_bin
+	@echo "⇒ steganography (functional run)"
+	@$(RUN_ENV) ./steganography testInputs/JohnConway.ppm \
+	    > studentOutputs/secretMessage.ppm
+	@echo "...output written to studentOutputs/secretMessage.ppm"
 
-gameoflifememcheck: gameoflife
-	$(DETECT_LEAKS) ./gameOfLife testInputs/JohnConway.ppm 0x1808 > studentOutputs/temp.ppm
+gameoflife: gameOfLife
+	@echo "⇒ Game of Life built — run ./frames.csh for visual test"
 
+########################################
+# STEP 2 – AddressSanitizer mem-checks
+########################################
+imagememcheck: imageloadertester
+	@echo "⇒ ASan memcheck — imageloadertester"
+	@$(RUN_ENV) ./imageloadertester testInputs/JohnConway.ppm >/dev/null
+
+steganographymemcheck: steganography_bin
+	@echo "⇒ ASan memcheck — steganography"
+	@$(RUN_ENV) ./steganography testInputs/JohnConway.ppm >/dev/null
+
+gameoflifememcheck: gameOfLife
+	@echo "⇒ ASan memcheck — Game of Life"
+	@$(RUN_ENV) ./gameOfLife testInputs/JohnConway.ppm 0x1808 >/dev/null
+
+########################################
+# Pattern rule for objects
+########################################
 %.o: %.c
-	$(CC) $(CFLAGS) $<
+	$(CC) $(CFLAGS) $< -o $@
 
+########################################
+# Cleanup
+########################################
 clean:
-	rm -f *.o
-	rm -f gameOfLife
-	rm -f steganography
-	rm -f imageloadertester
-	rm -f studentOutputs/*.ppm
+	rm -f *.o imageloadertester steganography gameOfLife \
+	       studentOutputs/*.ppm
