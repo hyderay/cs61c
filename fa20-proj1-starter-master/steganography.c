@@ -82,10 +82,6 @@ int main(int argc, char **argv)
     }
 
     Image *newImg = steganography(img);
-    if (newImg == NULL) {
-        freeImage(img);
-        return -1;
-    }
 
     writeData(newImg);
     freeImage(newImg);
