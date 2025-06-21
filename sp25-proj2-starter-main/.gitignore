@@ -593,3 +593,4 @@ test-src/
 # Test output files
 output.bin
 *-output.bin
+.idea/
